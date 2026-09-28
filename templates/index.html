@@ -151,6 +151,12 @@
 
                             <td>
                                 <a
+    href="/edit/{{ expense['id'] }}"
+    class="btn btn-warning btn-sm me-1"
+>
+    Edit
+</a>
+                                <a
                                     href="/delete/{{ expense['id'] }}"
                                     class="btn btn-danger btn-sm"
                                     onclick="return confirm('Delete this expense?')"

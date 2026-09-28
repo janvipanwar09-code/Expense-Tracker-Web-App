@@ -74,6 +74,42 @@ def add_expense():
     return redirect("/")
 
 
+@app.route("/edit/<int:expense_id>", methods=["GET", "POST"])
+def edit_expense(expense_id):
+
+    connection = get_db_connection()
+
+    expense = connection.execute(
+        "SELECT * FROM expenses WHERE id = ?",
+        (expense_id,)
+    ).fetchone()
+
+    if request.method == "POST":
+
+        title = request.form["title"]
+        amount = request.form["amount"]
+        category = request.form["category"]
+        date = request.form["date"]
+
+        connection.execute(
+            """
+            UPDATE expenses
+            SET title = ?, amount = ?, category = ?, date = ?
+            WHERE id = ?
+            """,
+            (title, amount, category, date, expense_id)
+        )
+
+        connection.commit()
+        connection.close()
+
+        return redirect("/")
+
+    connection.close()
+
+    return render_template("edit.html", expense=expense)
+
+
 @app.route("/delete/<int:expense_id>")
 def delete_expense(expense_id):
 
@@ -93,3 +129,6 @@ def delete_expense(expense_id):
 if __name__ == "__main__":
     create_table()
     app.run(debug=True)
+   
+
+  

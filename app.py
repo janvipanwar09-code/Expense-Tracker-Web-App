@@ -1,47 +1,25 @@
 from flask import Flask, render_template, request, redirect
-import sqlite3
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+import os
 
 app = Flask(__name__)
 
-DATABASE = "expenses.db"
+# MongoDB connection
+MONGODB_URI = os.environ.get("MONGODB_URI")
 
-
-def get_db_connection():
-    connection = sqlite3.connect(DATABASE)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
-def create_table():
-    connection = get_db_connection()
-
-    connection.execute("""
-        CREATE TABLE IF NOT EXISTS expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            amount REAL NOT NULL,
-            category TEXT NOT NULL,
-            date TEXT NOT NULL
-        )
-    """)
-
-    connection.commit()
-    connection.close()
+client = MongoClient(MONGODB_URI)
+db = client["expense_tracker"]
+expenses_collection = db["expenses"]
 
 
 @app.route("/")
 def index():
-    connection = get_db_connection()
+    expenses = list(
+        expenses_collection.find().sort("_id", -1)
+    )
 
-    expenses = connection.execute(
-        "SELECT * FROM expenses ORDER BY date DESC"
-    ).fetchall()
-
-    total = connection.execute(
-        "SELECT COALESCE(SUM(amount), 0) FROM expenses"
-    ).fetchone()[0]
-
-    connection.close()
+    total = sum(float(expense.get("amount", 0)) for expense in expenses)
 
     return render_template(
         "index.html",
@@ -54,81 +32,71 @@ def index():
 def add_expense():
 
     title = request.form["title"]
-    amount = request.form["amount"]
+    amount = float(request.form["amount"])
     category = request.form["category"]
     date = request.form["date"]
 
-    connection = get_db_connection()
-
-    connection.execute(
-        """
-        INSERT INTO expenses (title, amount, category, date)
-        VALUES (?, ?, ?, ?)
-        """,
-        (title, amount, category, date)
-    )
-
-    connection.commit()
-    connection.close()
+    expenses_collection.insert_one({
+        "title": title,
+        "amount": amount,
+        "category": category,
+        "date": date
+    })
 
     return redirect("/")
 
 
-@app.route("/edit/<int:expense_id>", methods=["GET", "POST"])
+@app.route("/delete/<expense_id>")
+def delete_expense(expense_id):
+
+    expenses_collection.delete_one(
+        {"_id": ObjectId(expense_id)}
+    )
+
+    return redirect("/")
+
+
+@app.route("/edit/<expense_id>", methods=["GET", "POST"])
 def edit_expense(expense_id):
 
-    connection = get_db_connection()
-
-    expense = connection.execute(
-        "SELECT * FROM expenses WHERE id = ?",
-        (expense_id,)
-    ).fetchone()
+    expense = expenses_collection.find_one(
+        {"_id": ObjectId(expense_id)}
+    )
 
     if request.method == "POST":
 
         title = request.form["title"]
-        amount = request.form["amount"]
+        amount = float(request.form["amount"])
         category = request.form["category"]
         date = request.form["date"]
 
-        connection.execute(
-            """
-            UPDATE expenses
-            SET title = ?, amount = ?, category = ?, date = ?
-            WHERE id = ?
-            """,
-            (title, amount, category, date, expense_id)
+        expenses_collection.update_one(
+            {"_id": ObjectId(expense_id)},
+            {
+                "$set": {
+                    "title": title,
+                    "amount": amount,
+                    "category": category,
+                    "date": date
+                }
+            }
         )
-
-        connection.commit()
-        connection.close()
 
         return redirect("/")
 
-    connection.close()
-
-    return render_template("edit.html", expense=expense)
-
-
-@app.route("/delete/<int:expense_id>")
-def delete_expense(expense_id):
-
-    connection = get_db_connection()
-
-    connection.execute(
-        "DELETE FROM expenses WHERE id = ?",
-        (expense_id,)
+    return render_template(
+        "edit.html",
+        expense=expense
     )
-
-    connection.commit()
-    connection.close()
-
-    return redirect("/")
 
 
 if __name__ == "__main__":
-    create_table()
-    app.run(debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000))
+    )
    
+   
+  
 
   

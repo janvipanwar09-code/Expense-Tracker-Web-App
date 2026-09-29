@@ -1,25 +1,49 @@
 from flask import Flask, render_template, request, redirect
-from pymongo import MongoClient
-from bson.objectid import ObjectId
+import sqlite3
 import os
 
 app = Flask(__name__)
 
-# MongoDB connection
-MONGODB_URI = os.environ.get("MONGODB_URI")
+DATABASE = "/tmp/expenses.db"
 
-client = MongoClient(MONGODB_URI)
-db = client["expense_tracker"]
-expenses_collection = db["expenses"]
+
+def get_db_connection():
+    connection = sqlite3.connect(DATABASE)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def create_table():
+    connection = get_db_connection()
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            amount REAL NOT NULL,
+            category TEXT NOT NULL,
+            date TEXT NOT NULL
+        )
+    """)
+
+    connection.commit()
+    connection.close()
+
+
+create_table()
 
 
 @app.route("/")
 def index():
-    expenses = list(
-        expenses_collection.find().sort("_id", -1)
-    )
+    connection = get_db_connection()
 
-    total = sum(float(expense.get("amount", 0)) for expense in expenses)
+    expenses = connection.execute(
+        "SELECT * FROM expenses ORDER BY id DESC"
+    ).fetchall()
+
+    total = sum(float(expense["amount"]) for expense in expenses)
+
+    connection.close()
 
     return render_template(
         "index.html",
@@ -36,32 +60,47 @@ def add_expense():
     category = request.form["category"]
     date = request.form["date"]
 
-    expenses_collection.insert_one({
-        "title": title,
-        "amount": amount,
-        "category": category,
-        "date": date
-    })
+    connection = get_db_connection()
+
+    connection.execute(
+        """
+        INSERT INTO expenses (title, amount, category, date)
+        VALUES (?, ?, ?, ?)
+        """,
+        (title, amount, category, date)
+    )
+
+    connection.commit()
+    connection.close()
 
     return redirect("/")
 
 
-@app.route("/delete/<expense_id>")
+@app.route("/delete/<int:expense_id>")
 def delete_expense(expense_id):
 
-    expenses_collection.delete_one(
-        {"_id": ObjectId(expense_id)}
+    connection = get_db_connection()
+
+    connection.execute(
+        "DELETE FROM expenses WHERE id = ?",
+        (expense_id,)
     )
+
+    connection.commit()
+    connection.close()
 
     return redirect("/")
 
 
-@app.route("/edit/<expense_id>", methods=["GET", "POST"])
+@app.route("/edit/<int:expense_id>", methods=["GET", "POST"])
 def edit_expense(expense_id):
 
-    expense = expenses_collection.find_one(
-        {"_id": ObjectId(expense_id)}
-    )
+    connection = get_db_connection()
+
+    expense = connection.execute(
+        "SELECT * FROM expenses WHERE id = ?",
+        (expense_id,)
+    ).fetchone()
 
     if request.method == "POST":
 
@@ -70,19 +109,21 @@ def edit_expense(expense_id):
         category = request.form["category"]
         date = request.form["date"]
 
-        expenses_collection.update_one(
-            {"_id": ObjectId(expense_id)},
-            {
-                "$set": {
-                    "title": title,
-                    "amount": amount,
-                    "category": category,
-                    "date": date
-                }
-            }
+        connection.execute(
+            """
+            UPDATE expenses
+            SET title = ?, amount = ?, category = ?, date = ?
+            WHERE id = ?
+            """,
+            (title, amount, category, date, expense_id)
         )
 
+        connection.commit()
+        connection.close()
+
         return redirect("/")
+
+    connection.close()
 
     return render_template(
         "edit.html",
@@ -95,8 +136,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("PORT", 5000))
     )
-   
-   
-  
-
-  
